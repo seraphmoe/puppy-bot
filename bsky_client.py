@@ -50,7 +50,13 @@ def send_post(profile, post_text):
 
 
 def query_feed(query):
-    response = client.app.bsky.feed.search_posts({'q': query})
+    response = client.app.bsky.feed.search_posts(
+        {
+            'q': query,
+            'sort': 'latest'
+        }
+    )
+
     feed = response.posts
 
     posts = []
