@@ -3,7 +3,10 @@
 from time import gmtime, strftime, sleep
 
 from bot_logger import log
-from atproto import Client, IdResolver
+from atproto import Client, IdResolver, models
+from ollama import generate_reply
+import random
+import bot_config as config
 
 
 client = Client()
@@ -49,30 +52,76 @@ def send_post(profile, post_text):
     return post
 
 
-def query_feed(query):
-    response = client.app.bsky.feed.search_posts({'q': query})
-    feed = response.posts
+def send_reply(text, reply_ref):
+    client.send_post(
+        text=text,
+        reply_to=reply_ref
+    )
 
-    posts = []
-    for post in feed:
-        posts.append(
-            {
-                'did': post.author.did,
-                'handle': post.author.handle,
-                'uri': post.uri,
-                'cid': post.cid,
-                'text': post.record.text
-            }
+
+def get_original_posts(replied_posts, handle, limit=10):
+    posts = client.get_author_feed(
+        actor=handle, 
+        limit=limit,
+        filter='posts_no_replies'
+    )
+
+    original_posts = []
+    if posts.feed:
+        original_post = None
+        for post in posts.feed:
+            if post.post.uri not in replied_posts:
+                original_post = post.post
+                break
+            else:
+                print(f'already found post {post.post.uri}, skipping...')
+        
+        if not original_post:
+            print("no post found")
+            return []
+
+        py_type = ''
+
+        # if not hasattr(original_post, 'embed'):
+        #     print('go fuck urself')
+        #     py_type = 'repost'
+
+        # if not hasattr(original_post.embed, 'py_type'):
+        #     print('also go fuck urself')
+        #     py_type = 'repost'
+
+        try: # TODO: change this to hasattr()
+            py_type = original_post.embed.py_type
+        except:
+            py_type = 'repost'
+
+        if py_type == 'app.bsky.embed.record#view':
+            print(f'original post (non-repost) from {original_post.author.handle}')
+            original_posts.append(original_post)
+
+    return original_posts
+
+
+def get_notifications():
+    notifications = client.app.bsky.notification.list_notifications()
+    return notifications
+
+
+def create_reply_ref(original_post):
+    reply_ref = models.app.bsky.feed.post.ReplyRef(
+        root=models.ComAtprotoRepoStrongRef.Main(
+            uri=original_post.uri,
+            cid=original_post.cid
+        ),
+        parent=models.ComAtprotoRepoStrongRef.Main(
+            uri=original_post.uri,
+            cid=original_post.cid
         )
+    )
+    return reply_ref
 
-    print(f'collected {len(posts)} posts...')
-    return posts
 
-
-def like_post(post):
-    cid = post['cid']
-    uri = post['uri']
-
+def like_post(uri, cid):
     try:
         uri = client.like(uri=uri, cid=cid).uri
     except Exception as e:
@@ -93,3 +142,11 @@ def repost_post(post):
 
     print(f'reposted {uri}')
     return uri
+
+
+def get_followers(profile):
+    client_followers = client.get_followers(actor=profile.did, limit=50)
+    followers = client_followers.followers
+    followers = random.sample(followers, 20)
+
+    return followers
